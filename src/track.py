@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -32,11 +33,24 @@ class Track:
     age: int = 0
     missed: int = 0
     counted: bool = False
+    class_locked: bool = False
+    class_votes: dict[str, float] = field(default_factory=lambda: defaultdict(float))
     last_pkg: Package | None = field(default=None, repr=False)
+
+    def vote(self, class_id: str, conf: float) -> None:
+        self.class_votes[class_id] += conf
+        if self.class_locked:
+            return
+        self.class_id = max(self.class_votes, key=self.class_votes.get)
+        scores = sorted(self.class_votes.values(), reverse=True)
+        leader = scores[0]
+        runner = scores[1] if len(scores) > 1 else 0.0
+        if self.hits >= 4 and leader >= max(0.35, 1.6 * runner):
+            self.class_locked = True
 
 
 class SessionTracker:
-    def __init__(self, confirm_hits: int = 8, max_missed: int = 20, iou_thresh: float = 0.30) -> None:
+    def __init__(self, confirm_hits: int = 10, max_missed: int = 20, iou_thresh: float = 0.30) -> None:
         self.confirm_hits = confirm_hits
         self.max_missed = max_missed
         self.iou_thresh = iou_thresh
@@ -63,19 +77,16 @@ class SessionTracker:
             tr.age += 1
             tr.missed += 1
 
-        unmatched = list(range(len(packages)))
         used_tracks: set[int] = set()
+        assigned_pkg: set[int] = set()
 
+        # Associate by location only so class flicker stays on one track.
         pairs: list[tuple[float, int, int]] = []
         for ti, tr in enumerate(self.tracks):
-            for pi in unmatched:
-                pkg = packages[pi]
-                if pkg.class_id != tr.class_id:
-                    continue
+            for pi, pkg in enumerate(packages):
                 pairs.append((_iou(tr.bbox, pkg.bbox), ti, pi))
         pairs.sort(reverse=True)
 
-        assigned_pkg: set[int] = set()
         for iou, ti, pi in pairs:
             if iou < self.iou_thresh:
                 break
@@ -86,9 +97,14 @@ class SessionTracker:
             tr.bbox = pkg.bbox.copy()
             tr.hits += 1
             tr.missed = 0
-            tr.last_pkg = pkg
+            tr.vote(pkg.class_id, pkg.conf)
+            pkg.class_id = tr.class_id
             pkg.track_id = tr.track_id
+            tr.last_pkg = pkg
             if not tr.counted and tr.hits >= self.confirm_hits:
+                tr.class_locked = True
+                tr.class_id = max(tr.class_votes, key=tr.class_votes.get)
+                pkg.class_id = tr.class_id
                 self.counts[tr.class_id] += 1
                 tr.counted = True
             used_tracks.add(ti)
@@ -102,8 +118,9 @@ class SessionTracker:
                 class_id=pkg.class_id,
                 bbox=pkg.bbox.copy(),
                 hits=1,
-                last_pkg=pkg,
             )
+            tr.vote(pkg.class_id, pkg.conf)
+            tr.last_pkg = pkg
             self._next_id += 1
             pkg.track_id = tr.track_id
             self.tracks.append(tr)

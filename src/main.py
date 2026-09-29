@@ -24,11 +24,22 @@ from src.track import SessionTracker
 warnings.filterwarnings("ignore", message=".*Found GPU.*compute capability.*")
 
 
+def parse_conf(value: str) -> float:
+    cleaned = value.strip().rstrip(".,")
+    try:
+        conf = float(cleaned)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid float value: {value!r}") from exc
+    if not 0.0 < conf <= 1.0:
+        raise argparse.ArgumentTypeError("--conf must be between 0 and 1")
+    return conf
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RealSense mixed-package volume demo")
     parser.add_argument("--model", default="yoloe-11s-seg.pt")
     parser.add_argument("--imgsz", type=int, default=640)
-    parser.add_argument("--conf", type=float, default=0.08)
+    parser.add_argument("--conf", type=parse_conf, default=0.12)
     parser.add_argument("--width", type=int, default=848)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fps", type=int, default=30)

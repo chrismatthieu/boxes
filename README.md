@@ -57,4 +57,4 @@ Keys: `q` quit, `r` reset all three counts, `p` pause.
 
 First run downloads YOLOE weights plus a MobileCLIP text encoder (~600 MB) used only to bake in the package prompts. Later launches reuse `models/package_text_pe.pt` and skip CLIP.
 
-Hold items about **0.5–1.5 m** from the camera so they fill a good portion of the frame. Default `--conf 0.08` is tuned for open-vocab YOLOE; raise it if you see false positives (e.g. instrument cases).
+Hold items about **0.5–1.5 m** from the camera so they fill a good portion of the frame. Default `--conf 0.12`. Raise it further if you still see false positives.

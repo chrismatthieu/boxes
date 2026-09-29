@@ -49,7 +49,7 @@ def split_layers(pkg: Package, depth: np.ndarray, depth_scale: float) -> list[Pa
         return [pkg]
     z = pkg.points_xyz[:, 2]
     z_span = float(z.max() - z.min())
-    if z_span < 0.08:
+    if z_span < 0.12:
         return [pkg]
     hist, edges = np.histogram(z, bins=20)
     if hist.max() < 15:
@@ -78,7 +78,10 @@ def split_layers(pkg: Package, depth: np.ndarray, depth_scale: float) -> list[Pa
     far = np.zeros((h, w), dtype=bool)
     near[ys, xs] = z_img <= split_z
     far[ys, xs] = z_img > split_z
-    if near.sum() < 80 or far.sum() < 80:
+    if near.sum() < 250 or far.sum() < 250:
+        return [pkg]
+    smaller, larger = sorted((int(near.sum()), int(far.sum())))
+    if smaller / max(larger, 1) < 0.35:
         return [pkg]
 
     split: list[Package] = []
@@ -98,23 +101,30 @@ def split_layers(pkg: Package, depth: np.ndarray, depth_scale: float) -> list[Pa
     return split
 
 
-def mark_stacked(packages: list[Package], iou_thresh: float = 0.10, max_gap_m: float = 0.08) -> bool:
+def mark_stacked(packages: list[Package], iou_thresh: float = 0.18, max_gap_m: float = 0.06) -> bool:
     any_stacked = False
     n = len(packages)
     for i in range(n):
         for j in range(i + 1, n):
             a, b = packages[i], packages[j]
-            iou = _bbox_iou(a.bbox, b.bbox)
             contained = _containment(a.bbox, b.bbox)
+            # A shipping label (or class double) sits inside the parent, not on top of it.
+            if contained >= 0.60:
+                continue
+            area_a = max(1.0, float(a.bbox[2] - a.bbox[0]) * float(a.bbox[3] - a.bbox[1]))
+            area_b = max(1.0, float(b.bbox[2] - b.bbox[0]) * float(b.bbox[3] - b.bbox[1]))
+            if min(area_a, area_b) / max(area_a, area_b) < 0.40:
+                continue
+            iou = _bbox_iou(a.bbox, b.bbox)
             gap = _z_gap(a, b)
             close_in_z = gap <= max_gap_m
-            overlap = iou >= iou_thresh or contained >= 0.45
-            # Side-view stacks: similar x range, one above the other, similar depth.
+            overlap = iou >= iou_thresh
             ax1, ay1, ax2, ay2 = a.bbox
             bx1, by1, bx2, by2 = b.bbox
             x_overlap = max(0.0, min(ax2, bx2) - max(ax1, bx1)) / max(1.0, min(ax2 - ax1, bx2 - bx1))
-            y_sep = min(abs(ay2 - by1), abs(by2 - ay1)) / max(ay2 - ay1, by2 - by1, 1.0)
-            side_stack = x_overlap > 0.45 and y_sep < 0.25 and abs(a.z_med - b.z_med) < 0.25
+            y_gap = min(abs(ay2 - by1), abs(by2 - ay1))
+            height = max(ay2 - ay1, by2 - by1, 1.0)
+            side_stack = x_overlap > 0.55 and y_gap < 0.15 * height and abs(a.z_med - b.z_med) < 0.18
             if (overlap and close_in_z) or side_stack:
                 a.stacked = True
                 b.stacked = True

@@ -11,6 +11,52 @@ import torch
 
 from .types import PROMPT_TO_CLASS, PROMPTS, Package
 
+
+def _bbox_area(bbox: np.ndarray) -> float:
+    return max(0.0, float(bbox[2] - bbox[0])) * max(0.0, float(bbox[3] - bbox[1]))
+
+
+def _bbox_iou(a: np.ndarray, b: np.ndarray) -> float:
+    x1 = max(float(a[0]), float(b[0]))
+    y1 = max(float(a[1]), float(b[1]))
+    x2 = min(float(a[2]), float(b[2]))
+    y2 = min(float(a[3]), float(b[3]))
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    if inter <= 0:
+        return 0.0
+    union = _bbox_area(a) + _bbox_area(b) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _containment_of_smaller(a: np.ndarray, b: np.ndarray) -> float:
+    """How much of the smaller box sits inside the intersection."""
+    x1 = max(float(a[0]), float(b[0]))
+    y1 = max(float(a[1]), float(b[1]))
+    x2 = min(float(a[2]), float(b[2]))
+    y2 = min(float(a[3]), float(b[3]))
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    smaller = min(_bbox_area(a), _bbox_area(b))
+    return inter / smaller if smaller > 0 else 0.0
+
+
+def suppress_duplicates(packages: list[Package]) -> list[Package]:
+    """Keep the largest object; drop labels and class-flicker doubles on the same item."""
+    if len(packages) <= 1:
+        return packages
+    ordered = sorted(packages, key=lambda p: _bbox_area(p.bbox), reverse=True)
+    kept: list[Package] = []
+    for pkg in ordered:
+        skip = False
+        for other in kept:
+            iou = _bbox_iou(pkg.bbox, other.bbox)
+            nested = _containment_of_smaller(pkg.bbox, other.bbox)
+            if iou >= 0.40 or nested >= 0.65:
+                skip = True
+                break
+        if not skip:
+            kept.append(pkg)
+    return kept
+
 warnings.filterwarnings("ignore", message=".*Found GPU.*compute capability.*")
 
 MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
@@ -22,7 +68,7 @@ class PackageDetector:
         self,
         model_name: str = "yoloe-11s-seg.pt",
         imgsz: int = 640,
-        conf: float = 0.08,
+        conf: float = 0.12,
         device: str | None = None,
     ) -> None:
         from ultralytics import YOLOE
@@ -84,8 +130,8 @@ class PackageDetector:
             source=bgr,
             imgsz=self.imgsz,
             conf=self.conf,
-            iou=0.45,
-            max_det=20,
+            iou=0.55,
+            max_det=12,
             agnostic_nms=True,
             verbose=False,
             device=self.device,
@@ -123,7 +169,7 @@ class PackageDetector:
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(w, x2), min(h, y2)
                 mask_bool[y1:y2, x1:x2] = True
-            if int(mask_bool.sum()) < 80:
+            if int(mask_bool.sum()) < 250:
                 continue
             packages.append(
                 Package(
@@ -134,4 +180,4 @@ class PackageDetector:
                     mask=mask_bool,
                 )
             )
-        return packages
+        return suppress_duplicates(packages)
