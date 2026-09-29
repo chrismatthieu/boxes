@@ -1,0 +1,137 @@
+"""YOLOE open-vocabulary instance segmentation for packages."""
+
+from __future__ import annotations
+
+import warnings
+from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
+
+from .types import PROMPT_TO_CLASS, PROMPTS, Package
+
+warnings.filterwarnings("ignore", message=".*Found GPU.*compute capability.*")
+
+MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
+DEFAULT_MODELS = ("yoloe-11s-seg.pt", "yoloe-26s-seg.pt", "yoloe-26n-seg.pt")
+
+
+class PackageDetector:
+    def __init__(
+        self,
+        model_name: str = "yoloe-11s-seg.pt",
+        imgsz: int = 640,
+        conf: float = 0.08,
+        device: str | None = None,
+    ) -> None:
+        from ultralytics import YOLOE
+        from ultralytics import settings as yolo_settings
+
+        self.imgsz = imgsz
+        self.conf = conf
+        self.device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            yolo_settings.update({"weights_dir": str(MODELS_DIR)})
+        except Exception:
+            pass
+        last_error: Exception | None = None
+        self.model = None
+        tried = (model_name,) + tuple(m for m in DEFAULT_MODELS if m != model_name)
+        for name in tried:
+            try:
+                weights = self._resolve_weights(name)
+                print(f"Loading {weights.name} on {self.device} ...")
+                self.model = YOLOE(str(weights))
+                downloaded = Path(name)
+                if downloaded.exists() and downloaded.resolve().parent != MODELS_DIR.resolve():
+                    dest = MODELS_DIR / downloaded.name
+                    if not dest.exists():
+                        downloaded.replace(dest)
+                break
+            except Exception as exc:
+                last_error = exc
+                print(f"Could not load {name}: {exc}")
+        if self.model is None:
+            raise RuntimeError(f"Could not load a YOLOE-seg model: {last_error}")
+        names = list(PROMPTS)
+        emb_path = MODELS_DIR / "package_text_pe.pt"
+        try:
+            embeddings = None
+            if emb_path.exists():
+                cached = torch.load(emb_path, map_location="cpu", weights_only=False)
+                if isinstance(cached, dict) and cached.get("names") == names:
+                    embeddings = cached["embeddings"]
+            if embeddings is None:
+                embeddings = self.model.get_text_pe(names)
+                torch.save({"names": names, "embeddings": embeddings}, emb_path)
+            self.model.set_classes(names, embeddings)
+        except Exception:
+            self.model.set_classes(names)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print(f"Text prompts set ({len(names)} classes).")
+
+    def _resolve_weights(self, model_name: str) -> Path:
+        local = MODELS_DIR / model_name
+        if local.exists():
+            return local
+        return Path(model_name)
+
+    def infer(self, bgr: np.ndarray) -> list[Package]:
+        results = self.model.predict(
+            source=bgr,
+            imgsz=self.imgsz,
+            conf=self.conf,
+            iou=0.45,
+            max_det=20,
+            agnostic_nms=True,
+            verbose=False,
+            device=self.device,
+            retina_masks=False,
+        )
+        if not results:
+            return []
+        result = results[0]
+        if result.boxes is None or len(result.boxes) == 0:
+            return []
+
+        h, w = bgr.shape[:2]
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+        clss = result.boxes.cls.cpu().numpy().astype(int)
+        names = result.names
+        masks_data = None
+        if result.masks is not None:
+            masks_data = result.masks.data.cpu().numpy()
+
+        packages: list[Package] = []
+        for i, bbox in enumerate(boxes):
+            prompt = names.get(int(clss[i]), "") if isinstance(names, dict) else str(names[int(clss[i])])
+            class_id = PROMPT_TO_CLASS.get(prompt)
+            if class_id is None:
+                continue
+            if masks_data is not None and i < len(masks_data):
+                mask = masks_data[i]
+                if mask.shape[0] != h or mask.shape[1] != w:
+                    mask = cv2.resize(mask.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+                mask_bool = mask > 0.5
+            else:
+                mask_bool = np.zeros((h, w), dtype=bool)
+                x1, y1, x2, y2 = bbox.astype(int)
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+                mask_bool[y1:y2, x1:x2] = True
+            if int(mask_bool.sum()) < 80:
+                continue
+            packages.append(
+                Package(
+                    class_id=class_id,
+                    prompt=prompt,
+                    conf=float(confs[i]),
+                    bbox=bbox.astype(np.float32),
+                    mask=mask_bool,
+                )
+            )
+        return packages

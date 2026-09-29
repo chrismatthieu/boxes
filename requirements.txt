@@ -1,0 +1,11 @@
+# Install torch/torchvision first from the CUDA 13.2 index:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
+# Then:
+#   pip install -r requirements.txt
+ultralytics>=8.3.0
+scipy>=1.11.0
+filterpy>=1.4.5
+numpy>=1.26,<2
+ftfy
+tqdm
+regex

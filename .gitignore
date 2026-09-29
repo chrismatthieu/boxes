@@ -1,0 +1,25 @@
+# Virtualenv and Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+
+# YOLO / CLIP weights and runtime artifacts (downloaded on first run)
+models/*
+!models/.gitkeep
+*.pt
+*.onnx
+*.engine
+*.ts
+mobileclip_blt.ts
+last_frame.jpg
+text_pe_cache.pt
+.ultralytics/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*~
