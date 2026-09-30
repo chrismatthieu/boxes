@@ -30,18 +30,35 @@ PROMPT_TO_CLASS = {
     "shipping box": CLASS_BOX,
     "corrugated box": CLASS_BOX,
     "cardboard package": CLASS_BOX,
-    "parcel": CLASS_BOX,
-    "plastic tote": CLASS_BOX,
     "crate": CLASS_BOX,
+    "shopping bag": CLASS_PADDED_BAG,
+    "paper shopping bag": CLASS_PADDED_BAG,
+    "grocery bag": CLASS_PADDED_BAG,
+    "gift bag": CLASS_PADDED_BAG,
+    "plastic tote": CLASS_PADDED_BAG,
     "padded bag": CLASS_PADDED_BAG,
     "bubble mailer": CLASS_PADDED_BAG,
     "poly mailer": CLASS_PADDED_BAG,
-    "plastic padded mailer": CLASS_PADDED_BAG,
     "jiffy envelope": CLASS_JIFFY,
-    "kraft padded envelope": CLASS_JIFFY,
-    "paper padded envelope": CLASS_JIFFY,
     "jiffy bag": CLASS_JIFFY,
+    "jiffy mailer": CLASS_JIFFY,
+    "kraft mailer": CLASS_JIFFY,
+    "kraft padded envelope": CLASS_JIFFY,
+    "padded envelope": CLASS_JIFFY,
+    "bubble envelope": CLASS_JIFFY,
+    "paper envelope": CLASS_JIFFY,
+    "manila envelope": CLASS_JIFFY,
+    "shipping envelope": CLASS_JIFFY,
 }
+
+# Plastic mailers that also fire on cardboard; shopping bags and envelopes use --conf.
+MAILER_PROMPTS = frozenset(
+    {
+        "padded bag",
+        "bubble mailer",
+        "poly mailer",
+    }
+)
 
 PROMPTS = list(PROMPT_TO_CLASS.keys())
 

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.classify import refine_package
 from src.camera import RealSenseCamera
 from src.detect import PackageDetector
 from src.measure import measure_all
@@ -95,7 +96,12 @@ def main() -> int:
                             measure_all(layers, depth, fx, fy, ppx, ppy, cam.depth_scale)
                         )
                 stacked_warning = mark_stacked(expanded)
-                packages = tracker.update(expanded)
+                refined = []
+                for pkg in expanded:
+                    cleaned = refine_package(pkg)
+                    if cleaned is not None:
+                        refined.append(cleaned)
+                packages = tracker.update(refined)
             else:
                 packages = [t.last_pkg for t in tracker.tracks if t.last_pkg is not None]
                 stacked_warning = any(p.stacked for p in packages)

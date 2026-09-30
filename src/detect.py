@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import torch
 
-from .types import PROMPT_TO_CLASS, PROMPTS, Package
+from .types import CLASS_JIFFY, MAILER_PROMPTS, PROMPT_TO_CLASS, PROMPTS, Package
 
 
 def _bbox_area(bbox: np.ndarray) -> float:
@@ -39,6 +39,19 @@ def _containment_of_smaller(a: np.ndarray, b: np.ndarray) -> float:
     return inter / smaller if smaller > 0 else 0.0
 
 
+def _similar_size(a: np.ndarray, b: np.ndarray) -> bool:
+    aa, ab = _bbox_area(a), _bbox_area(b)
+    larger = max(aa, ab, 1.0)
+    return min(aa, ab) / larger >= 0.60
+
+
+def _prefer_incoming(kept: Package, incoming: Package) -> bool:
+    """Same physical item: keep the better class, with a slight preference for envelopes."""
+    if incoming.class_id == CLASS_JIFFY and kept.class_id != CLASS_JIFFY:
+        return incoming.conf >= kept.conf * 0.80
+    return incoming.conf > kept.conf + 0.05
+
+
 def suppress_duplicates(packages: list[Package]) -> list[Package]:
     """Keep the largest object; drop labels and class-flicker doubles on the same item."""
     if len(packages) <= 1:
@@ -47,12 +60,15 @@ def suppress_duplicates(packages: list[Package]) -> list[Package]:
     kept: list[Package] = []
     for pkg in ordered:
         skip = False
-        for other in kept:
+        for i, other in enumerate(kept):
             iou = _bbox_iou(pkg.bbox, other.bbox)
             nested = _containment_of_smaller(pkg.bbox, other.bbox)
-            if iou >= 0.40 or nested >= 0.65:
-                skip = True
-                break
+            if iou < 0.40 and nested < 0.65:
+                continue
+            if _similar_size(pkg.bbox, other.bbox) and _prefer_incoming(other, pkg):
+                kept[i] = pkg
+            skip = True
+            break
         if not skip:
             kept.append(pkg)
     return kept
@@ -132,7 +148,7 @@ class PackageDetector:
             conf=self.conf,
             iou=0.55,
             max_det=12,
-            agnostic_nms=True,
+            agnostic_nms=False,
             verbose=False,
             device=self.device,
             retina_masks=False,
@@ -169,13 +185,16 @@ class PackageDetector:
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(w, x2), min(h, y2)
                 mask_bool[y1:y2, x1:x2] = True
-            if int(mask_bool.sum()) < 250:
+            if int(mask_bool.sum()) < 180:
+                continue
+            conf = float(confs[i])
+            if prompt in MAILER_PROMPTS and conf < min(0.95, self.conf + 0.14):
                 continue
             packages.append(
                 Package(
                     class_id=class_id,
                     prompt=prompt,
-                    conf=float(confs[i]),
+                    conf=conf,
                     bbox=bbox.astype(np.float32),
                     mask=mask_bool,
                 )

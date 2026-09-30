@@ -38,15 +38,28 @@ class Track:
     last_pkg: Package | None = field(default=None, repr=False)
 
     def vote(self, class_id: str, conf: float) -> None:
-        self.class_votes[class_id] += conf
+        if class_id == CLASS_PADDED_BAG:
+            weight = 1.20
+        elif class_id == CLASS_JIFFY:
+            weight = 1.25
+        else:
+            weight = 1.05
+        self.class_votes[class_id] += conf * weight
         if self.class_locked:
             return
-        self.class_id = max(self.class_votes, key=self.class_votes.get)
+        self.class_id = self.resolved_class()
         scores = sorted(self.class_votes.values(), reverse=True)
         leader = scores[0]
         runner = scores[1] if len(scores) > 1 else 0.0
-        if self.hits >= 4 and leader >= max(0.35, 1.6 * runner):
+        if self.class_id == CLASS_BOX and self.hits >= 4 and leader >= max(0.35, 1.5 * runner):
             self.class_locked = True
+        elif self.class_id in (CLASS_PADDED_BAG, CLASS_JIFFY) and self.hits >= 4 and leader >= max(0.35, 1.4 * runner):
+            self.class_locked = True
+
+    def resolved_class(self) -> str:
+        if not self.class_votes:
+            return self.class_id
+        return max(self.class_votes, key=self.class_votes.get)
 
 
 class SessionTracker:
@@ -103,7 +116,7 @@ class SessionTracker:
             tr.last_pkg = pkg
             if not tr.counted and tr.hits >= self.confirm_hits:
                 tr.class_locked = True
-                tr.class_id = max(tr.class_votes, key=tr.class_votes.get)
+                tr.class_id = tr.resolved_class()
                 pkg.class_id = tr.class_id
                 self.counts[tr.class_id] += 1
                 tr.counted = True
