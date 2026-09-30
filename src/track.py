@@ -40,10 +40,10 @@ class Track:
     def vote(self, class_id: str, conf: float) -> None:
         if class_id == CLASS_PADDED_BAG:
             weight = 1.20
-        elif class_id == CLASS_JIFFY:
-            weight = 1.25
+        elif class_id == CLASS_BOX:
+            weight = 1.15
         else:
-            weight = 1.05
+            weight = 1.00
         self.class_votes[class_id] += conf * weight
         if self.class_locked:
             return

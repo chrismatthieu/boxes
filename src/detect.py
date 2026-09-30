@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import torch
 
-from .types import CLASS_JIFFY, MAILER_PROMPTS, PROMPT_TO_CLASS, PROMPTS, Package
+from .types import CLASS_BOX, CLASS_JIFFY, CLASS_PADDED_BAG, MAILER_PROMPTS, PROMPT_TO_CLASS, PROMPTS, Package
 
 
 def _bbox_area(bbox: np.ndarray) -> float:
@@ -46,9 +46,17 @@ def _similar_size(a: np.ndarray, b: np.ndarray) -> bool:
 
 
 def _prefer_incoming(kept: Package, incoming: Package) -> bool:
-    """Same physical item: keep the better class, with a slight preference for envelopes."""
-    if incoming.class_id == CLASS_JIFFY and kept.class_id != CLASS_JIFFY:
+    """Same physical item: keep the better class.
+
+    Envelopes may replace a plastic-bag label. They must not replace a box —
+    small cartons often score as kraft/jiffy in open-vocab YOLO.
+    """
+    if incoming.class_id == CLASS_JIFFY and kept.class_id == CLASS_PADDED_BAG:
         return incoming.conf >= kept.conf * 0.80
+    if incoming.class_id == CLASS_JIFFY and kept.class_id == CLASS_BOX:
+        return False
+    if incoming.class_id == CLASS_BOX and kept.class_id == CLASS_JIFFY:
+        return incoming.conf >= kept.conf * 0.85
     return incoming.conf > kept.conf + 0.05
 
 
@@ -74,6 +82,7 @@ def suppress_duplicates(packages: list[Package]) -> list[Package]:
     return kept
 
 warnings.filterwarnings("ignore", message=".*Found GPU.*compute capability.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch.jit")
 
 MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
 DEFAULT_MODELS = ("yoloe-11s-seg.pt", "yoloe-26s-seg.pt", "yoloe-26n-seg.pt")
@@ -93,6 +102,7 @@ class PackageDetector:
         self.imgsz = imgsz
         self.conf = conf
         self.device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.quantize = 16 if self.device.startswith("cuda") else None
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         try:
             yolo_settings.update({"weights_dir": str(MODELS_DIR)})
@@ -119,30 +129,47 @@ class PackageDetector:
             raise RuntimeError(f"Could not load a YOLOE-seg model: {last_error}")
         names = list(PROMPTS)
         emb_path = MODELS_DIR / "package_text_pe.pt"
-        try:
-            embeddings = None
-            if emb_path.exists():
+        embeddings = None
+        if emb_path.exists():
+            try:
                 cached = torch.load(emb_path, map_location="cpu", weights_only=False)
                 if isinstance(cached, dict) and cached.get("names") == names:
                     embeddings = cached["embeddings"]
-            if embeddings is None:
-                embeddings = self.model.get_text_pe(names)
-                torch.save({"names": names, "embeddings": embeddings}, emb_path)
-            self.model.set_classes(names, embeddings)
+                    print(f"Loaded cached text embeddings ({len(names)} prompts).")
+            except Exception as exc:
+                print(f"Could not read {emb_path.name}: {exc}")
+        if embeddings is None:
+            print("Baking text embeddings with MobileCLIP (one-time, about a minute)...")
+            embeddings = self.model.get_text_pe(names)
+            torch.save({"names": names, "embeddings": embeddings}, emb_path)
+            print(f"Saved {emb_path}")
+        self.model.set_classes(names, embeddings)
+        try:
+            self.model.fuse(verbose=False)
         except Exception:
-            self.model.set_classes(names)
-        if torch.cuda.is_available():
+            pass
+        if self.device.startswith("cuda"):
+            torch.backends.cudnn.benchmark = True
             torch.cuda.empty_cache()
-        print(f"Text prompts set ({len(names)} classes).")
+        dummy = np.zeros((self.imgsz, self.imgsz, 3), dtype=np.uint8)
+        try:
+            self._predict(dummy)
+        except Exception as exc:
+            if self.quantize == 16:
+                print(f"FP16 warmup failed ({exc}); using FP32.")
+                self.quantize = None
+                self._predict(dummy)
+            else:
+                raise
+        prec = "FP16" if self.quantize == 16 else "FP32"
+        print(f"Text prompts set ({len(names)} classes) on {self.device} {prec}.")
 
-    def _resolve_weights(self, model_name: str) -> Path:
-        local = MODELS_DIR / model_name
-        if local.exists():
-            return local
-        return Path(model_name)
+    @property
+    def half(self) -> bool:
+        return self.quantize == 16
 
-    def infer(self, bgr: np.ndarray) -> list[Package]:
-        results = self.model.predict(
+    def _predict(self, bgr: np.ndarray):
+        return self.model.predict(
             source=bgr,
             imgsz=self.imgsz,
             conf=self.conf,
@@ -151,8 +178,18 @@ class PackageDetector:
             agnostic_nms=False,
             verbose=False,
             device=self.device,
+            quantize=self.quantize,
             retina_masks=False,
         )
+
+    def _resolve_weights(self, model_name: str) -> Path:
+        local = MODELS_DIR / model_name
+        if local.exists():
+            return local
+        return Path(model_name)
+
+    def infer(self, bgr: np.ndarray) -> list[Package]:
+        results = self._predict(bgr)
         if not results:
             return []
         result = results[0]

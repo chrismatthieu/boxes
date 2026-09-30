@@ -21,10 +21,12 @@ def _sorted_dims(pkg: Package) -> tuple[float, float, float] | None:
     return shortest, mid, longest
 
 
-def _is_cubic(dims: tuple[float, float, float]) -> bool:
-    """Small shipping carton: all three sides substantial and similar."""
+def _is_carton(dims: tuple[float, float, float]) -> bool:
+    """Too thick to be a mailer, or a compact shipping carton."""
     shortest, _mid, longest = dims
-    return shortest >= 5.0 and (shortest / max(longest, 1.0)) >= 0.40
+    if shortest >= 4.5:
+        return True
+    return shortest >= 3.5 and (shortest / max(longest, 1.0)) >= 0.32
 
 
 def _is_mailer(dims: tuple[float, float, float]) -> bool:
@@ -39,11 +41,11 @@ def _is_mailer(dims: tuple[float, float, float]) -> bool:
 
 
 def refine_package(pkg: Package) -> Package | None:
-    """Keep envelopes as jiffy unless the shape is a real carton."""
+    """Keep thin mailers as jiffy; anything ~box-thick becomes a box."""
     dims = _sorted_dims(pkg)
 
     if pkg.class_id == CLASS_JIFFY:
-        if dims is not None and _is_cubic(dims):
+        if dims is not None and _is_carton(dims):
             pkg.class_id = CLASS_BOX
         return pkg
 

@@ -25,9 +25,9 @@ def _draw_text(
         scale,
         (0, 0, 0),
         thickness + 2,
-        cv2.LINE_AA,
+        cv2.LINE_8,
     )
-    cv2.putText(image, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+    cv2.putText(image, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_8)
 
 
 def draw(
@@ -36,18 +36,18 @@ def draw(
     tracker: SessionTracker,
     fps: float,
     stacked_warning: bool,
+    extra: str = "",
 ) -> np.ndarray:
     vis = bgr.copy()
-    overlay = vis.copy()
     for pkg in packages:
         color = CLASS_COLORS.get(pkg.class_id, (200, 200, 200))
-        overlay[pkg.mask] = (0.45 * overlay[pkg.mask] + 0.55 * np.array(color, dtype=np.float32)).astype(
-            np.uint8
-        )
+        if pkg.mask is not None and pkg.mask.any():
+            roi = vis[pkg.mask]
+            vis[pkg.mask] = (roi.astype(np.float32) * 0.55 + np.array(color, dtype=np.float32) * 0.45).astype(
+                np.uint8
+            )
         x1, y1, x2, y2 = pkg.bbox.astype(int)
         cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-
-    vis = cv2.addWeighted(overlay, 0.55, vis, 0.45, 0)
 
     for pkg in packages:
         color = CLASS_COLORS.get(pkg.class_id, (200, 200, 200))
@@ -78,7 +78,10 @@ def draw(
     _draw_text(vis, hud, (12, 28), scale=0.65, color=(240, 240, 240), thickness=2)
     live = sum(1 for p in packages)
     stacked_n = sum(1 for p in packages if p.stacked)
-    status = f"Live: {live}    Stacked now: {stacked_n}    {fps:.1f} FPS    [q] quit  [r] reset  [p] pause"
+    status = (
+        f"Live: {live}    Stacked now: {stacked_n}    {fps:.1f} FPS"
+        f"{('    ' + extra) if extra else ''}    [q] quit  [r] reset  [p] pause"
+    )
     _draw_text(vis, status, (12, 50), scale=0.48, color=(200, 200, 200), thickness=1)
     if stacked_warning:
         _draw_text(

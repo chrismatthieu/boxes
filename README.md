@@ -1,6 +1,6 @@
 # RealSense mixed-package volume demo
 
-Live overlay on a Jetson Orin Nano Super with a RealSense D436: segments **boxes**, **padded bags**, and **jiffy envelopes**, shows L×W×H and volume for each, warns when items are stacked, and keeps three unique session counters.
+Live overlay on a Jetson Orin Nano Super with a RealSense **D415** or **D436**: segments **boxes**, **padded bags**, and **jiffy envelopes**, shows L×W×H and volume for each, warns when items are stacked, and keeps three unique session counters.
 
 ## Setup (once)
 
@@ -32,6 +32,13 @@ Camera on a USB 3 port, display on `:0`:
 ```bash
 cd /home/nvidia/Projects/boxes
 ./run.sh
+```
+
+The app picks a color+depth mode both cameras support (848×480 on D435/D436, typically 640×480 on D415). List cameras or pin one by serial:
+
+```bash
+./run.sh --list-cameras
+./run.sh --serial 0123456789
 ```
 
 Windowed:

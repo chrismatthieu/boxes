@@ -19,7 +19,7 @@ def _deproject(
     ppx: float,
     ppy: float,
     depth_scale: float,
-    stride: int = 2,
+    stride: int = 3,
 ) -> np.ndarray:
     ys, xs = np.nonzero(mask[::stride, ::stride])
     ys = ys * stride
@@ -70,7 +70,7 @@ def fit_support_plane(
 ) -> tuple[np.ndarray, float] | None:
     """RANSAC plane (table/floor) from background depth. Returns (normal, d) with n·x + d = 0."""
     h, w = depth.shape
-    stride = 8
+    stride = 10
     grid = np.zeros((h, w), dtype=bool)
     grid[::stride, ::stride] = True
     if ignore_mask is not None:
@@ -84,16 +84,16 @@ def fit_support_plane(
     x = (xs.astype(np.float32) - ppx) / fx * z
     y = (ys.astype(np.float32) - ppy) / fy * z
     points = np.stack((x, y, z), axis=1)
-    if len(points) > 2500:
+    if len(points) > 1200:
         rng = np.random.default_rng(1)
-        points = points[rng.choice(len(points), 2500, replace=False)]
+        points = points[rng.choice(len(points), 1200, replace=False)]
     npts = len(points)
     rng = np.random.default_rng(2)
     best_count = 0
     best_n: np.ndarray | None = None
     best_d = 0.0
     thresh = 0.015
-    for _ in range(60):
+    for _ in range(28):
         idx = rng.choice(npts, 3, replace=False)
         p0, p1, p2 = points[idx]
         normal = np.cross(p1 - p0, p2 - p0)
