@@ -1,4 +1,4 @@
-"""Live mixed-package volume demo: RealSense D400 + YOLOE-seg + depth measurement."""
+"""Live mixed-package volume demo: RealSense D400/D585 + YOLOE-seg + depth measurement."""
 
 from __future__ import annotations
 
